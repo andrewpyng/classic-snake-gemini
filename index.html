@@ -40,6 +40,21 @@
             display: flex;
             gap: 20px;
         }
+        .score-board select {
+            background: var(--game-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+
+        /* Difficulty button group used on overlays */
+        .difficulty-buttons { display:flex; gap:8px; align-items:center; justify-content:center; }
+        /* make rules specific to override .btn defaults */
+        .btn.diff-btn { background: rgba(255,255,255,0.03); color: var(--text-color); border: 1px solid var(--border-color); padding:8px 12px; border-radius:6px; font-weight:700; }
+        .btn.diff-btn:hover { transform:translateY(-2px); }
+        .btn.diff-btn.selected { background: var(--snake-color); color: #0f172a; border-color: transparent; box-shadow: 0 6px 18px rgba(56,189,248,0.15); }
 
         .game-container {
             position: relative;
@@ -146,6 +161,7 @@
     <div class="score-board">
         <span>Score: <span id="score">0</span></span>
         <span>High Score: <span id="highScore">0</span></span>
+        <!-- difficulty removed from header (select will appear in overlays as buttons) -->
     </div>
 
     <div class="game-container">
@@ -155,7 +171,14 @@
         <div id="startScreen" class="overlay">
             <h2>Ready?</h2>
             <p>Use Arrow Keys to Move</p>
-            <button class="btn" onclick="startGame()">Start Game</button>
+            <button class="btn" id="startBtn" onclick="startGame()">Start Game</button>
+
+            <!-- Difficulty selector shown as three buttons below Start -->
+            <div class="difficulty-buttons" aria-hidden="false" style="margin-top:12px; display:flex; gap:8px;">
+                <button class="btn diff-btn" data-diff="easy">Easy</button>
+                <button class="btn diff-btn" data-diff="normal">Normal</button>
+                <button class="btn diff-btn" data-diff="hard">Hard</button>
+            </div>
         </div>
 
         <!-- Game Over Screen -->
@@ -163,6 +186,11 @@
             <h2 style="color: #ef4444;">Game Over</h2>
             <p>Score: <span id="finalScore">0</span></p>
             <button class="btn" onclick="startGame()">Play Again</button>
+            <div style="margin: 8px 0 0; display:flex; gap:8px;">
+                <button class="btn diff-btn" data-diff="easy">Easy</button>
+                <button class="btn diff-btn" data-diff="normal">Normal</button>
+                <button class="btn diff-btn" data-diff="hard">Hard</button>
+            </div>
         </div>
     </div>
 
@@ -188,7 +216,19 @@
         // Game Settings
         const GRID_SIZE = 20;
         const TILE_COUNT = canvas.width / GRID_SIZE;
-        let SPEED = 100; // Lower is faster
+
+        // Difficulty settings (ms per tick — higher is slower)
+        const DIFFICULTIES = {
+            easy:   { label: 'Easy',   base: 180, step: 3,  min: 80 },
+            normal: { label: 'Normal', base: 120, step: 5,  min: 50 },
+            hard:   { label: 'Hard',   base: 80,  step: 8,  min: 30 }
+        };
+
+        // Active difficulty (persisted in localStorage)
+        let difficulty = localStorage.getItem('snakeDifficulty') || 'normal';
+        let SPEED;      // current interval delay in ms
+        let SPEED_STEP; // how much to reduce by when speeding up
+        let MIN_SPEED;  // minimum allowed delay
 
         // Game State
         let snake = [];
@@ -202,6 +242,49 @@
         let nextDirection = { x: 0, y: 0 }; // Buffer for next move to prevent rapid keypress bugs
 
         highScoreEl.innerText = highScore;
+
+        // Initialize difficulty buttons and apply settings
+        function setSelectedButtons() {
+            // apply selected class to any .diff-btn matching current difficulty
+            document.querySelectorAll('.diff-btn').forEach(b => {
+                if (b.dataset && b.dataset.diff === difficulty) b.classList.add('selected');
+                else b.classList.remove('selected');
+            });
+        }
+
+        function applyDifficultySettings(resetInterval = false) {
+            const cfg = DIFFICULTIES[difficulty] || DIFFICULTIES.normal;
+            SPEED = cfg.base;
+            SPEED_STEP = cfg.step;
+            MIN_SPEED = cfg.min;
+
+            // If game is running and asked to reset interval, update timer
+            if (isGameRunning && resetInterval) {
+                clearInterval(gameInterval);
+                gameInterval = setInterval(gameLoop, SPEED);
+            }
+        }
+
+        // wire up difficulty buttons (start & game-over overlays)
+        function wireDifficultyButtons() {
+            document.querySelectorAll('.diff-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const sel = btn.dataset.diff;
+                    if (!sel) return;
+                    difficulty = sel;
+                    localStorage.setItem('snakeDifficulty', difficulty);
+                    // reflect visual selection in all buttons
+                    setSelectedButtons();
+                    // apply immediately (if game is running reset the interval)
+                    applyDifficultySettings(true);
+                });
+            });
+        }
+
+        // ensure SPEED is set before first start and wire buttons
+        setSelectedButtons();
+        wireDifficultyButtons();
+        applyDifficultySettings(false);
 
         // Initialize Game
         function initGame() {
@@ -263,10 +346,10 @@
                 score += 10;
                 scoreEl.innerText = score;
                 spawnFood();
-                // Increase speed slightly every 50 points
-                if (score % 50 === 0 && SPEED > 50) {
+                // Increase speed slightly every 50 points using difficulty-specific step/min
+                if (score % 50 === 0 && SPEED > MIN_SPEED) {
                     clearInterval(gameInterval);
-                    SPEED -= 5;
+                    SPEED = Math.max(SPEED - SPEED_STEP, MIN_SPEED);
                     gameInterval = setInterval(gameLoop, SPEED);
                 }
             } else {
